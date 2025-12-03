@@ -1,0 +1,9 @@
+pandas
+scikit-learn
+matplotlib
+seaborn
+numpy
+fastapi
+uvicorn
+python-multipart
+requests
