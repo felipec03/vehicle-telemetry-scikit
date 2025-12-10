@@ -58,62 +58,84 @@ def solve_tsp_greedy(points):
     
     return path, total_dist
 
-def optimize_routes(df, n_vehicles=5):
+from datetime import datetime, timedelta
+
+def optimize_single_route(start_lat, start_lon, end_lat, end_lon, avg_speed_kmh, arrival_time_str, vehicle_id="vehicle_1"):
     """
-    Optimizes routes for the fleet using Clustering + TSP.
+    Calculates trip details for a single vehicle.
     
     Args:
-        df (pd.DataFrame): DataFrame with 'lat' and 'long'.
-        n_vehicles (int): Number of vehicles/routes to create.
+        start_lat, start_lon: Coordinates of start point.
+        end_lat, end_lon: Coordinates of end point.
+        avg_speed_kmh: Average speed in km/h.
+        arrival_time_str: Target arrival time (ISO format string).
+        vehicle_id: ID of the vehicle.
         
     Returns:
-        routes (dict): Dictionary of vehicle_id -> ordered path.
+        dict: Route details including path, distance, duration, and departure time.
     """
-    print("\n--- Optimizing Routes ---")
+    print(f"\n--- Optimizing Route for {vehicle_id} ---")
+    print(f"Start: ({start_lat}, {start_lon})")
+    print(f"End: ({end_lat}, {end_lon})")
+    print(f"Speed: {avg_speed_kmh} km/h")
+    print(f"Target Arrival: {arrival_time_str}")
+
+    # 1. Calculate Distance (Haversine)
+    air_dist_km = haversine_distance(start_lat, start_lon, end_lat, end_lon)
     
-    # Filter valid locations
-    df_loc = df.dropna(subset=['lat', 'long']).copy()
+    # Apply Tortuosity Factor (approx 1.4 for urban/intercity roads)
+    # This makes the distance estimation more realistic for fleet management
+    # as vehicles cannot travel in straight lines.
+    TORTUOSITY_FACTOR = 1.4
+    road_dist_km = air_dist_km * TORTUOSITY_FACTOR
     
-    if len(df_loc) < n_vehicles:
-        print("Not enough data points for clustering.")
-        return {}
+    # 2. Calculate Duration
+    if avg_speed_kmh <= 0:
+        raise ValueError("Average speed must be greater than 0")
+        
+    duration_hours = road_dist_km / avg_speed_kmh
     
-    # 1. Clustering (Assign stops to vehicles)
-    kmeans = KMeans(n_clusters=n_vehicles, random_state=42, n_init=10)
-    df_loc['cluster'] = kmeans.fit_predict(df_loc[['lat', 'long']])
+    # 3. Calculate Timings
+    try:
+        arrival_dt = datetime.fromisoformat(arrival_time_str.replace('Z', '+00:00'))
+        departure_dt = arrival_dt - timedelta(hours=duration_hours)
+    except ValueError as e:
+        print(f"Error parsing date: {e}")
+        # Fallback or re-raise
+        raise ValueError(f"Invalid date format: {arrival_time_str}")
+
+    print(f"Air Distance: {air_dist_km:.2f} km")
+    print(f"Est. Road Distance: {road_dist_km:.2f} km")
+    print(f"Duration: {duration_hours:.2f} hours")
+    print(f"Departure: {departure_dt}")
     
-    routes = {}
+    # 4. Generate Path (Straight line for now, but could be interpolated)
+    # We return a list of points. 
+    path = [(start_lat, start_lon), (end_lat, end_lon)]
     
+    # Plotting (Optional, for debugging/visualization)
     plt.figure(figsize=(10, 6))
-    colors = plt.cm.get_cmap('tab10', n_vehicles)
+    lats = [p[0] for p in path]
+    longs = [p[1] for p in path]
+    plt.plot(longs, lats, marker='o', linestyle='-', color='blue', label='Route')
+    plt.scatter([start_lon], [start_lat], color='green', label='Start', zorder=5)
+    plt.scatter([end_lon], [end_lat], color='red', label='End', zorder=5)
     
-    for i in range(n_vehicles):
-        cluster_points = df_loc[df_loc['cluster'] == i][['lat', 'long']].values
-        points_tuple = [tuple(x) for x in cluster_points]
-        
-        if not points_tuple:
-            continue
-            
-        # 2. TSP (Order stops within cluster)
-        ordered_path, dist = solve_tsp_greedy(points_tuple)
-        routes[i] = ordered_path
-        
-        print(f"Vehicle {i+1}: {len(ordered_path)-1} stops, Est. Distance: {dist:.2f} km")
-        
-        # Plot
-        lats = [p[0] for p in ordered_path]
-        longs = [p[1] for p in ordered_path]
-        plt.plot(longs, lats, marker='o', linestyle='-', label=f'Vehicle {i+1}', color=colors(i))
-        
-    plt.title('Optimized Fleet Routes')
+    plt.title(f'Optimized Route for {vehicle_id} (Est. Road Dist: {road_dist_km:.2f}km)')
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     plt.legend()
     plt.grid(True)
     plt.savefig('route_optimization_map.png')
-    print("Route map saved to 'route_optimization_map.png'")
     
-    return routes
+    return {
+        "vehicle_id": vehicle_id,
+        "route": path,
+        "total_distance_km": road_dist_km,
+        "estimated_duration_hours": duration_hours,
+        "departure_time": departure_dt.isoformat(),
+        "arrival_time": arrival_dt.isoformat()
+    }
 
 if __name__ == "__main__":
     # Test run
